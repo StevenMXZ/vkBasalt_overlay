@@ -22,6 +22,7 @@ namespace vkBasalt
             newSettings.depthCapture = settingsDepthCapture;
             newSettings.autoApplyDelay = settingsAutoApplyDelay;
             newSettings.showDebugWindow = settingsShowDebugWindow;
+            newSettings.renderPassInjection = settingsRenderBelowUI;
             ConfigSerializer::saveSettings(newSettings);
             settingsSaved = true;
         };
@@ -71,17 +72,6 @@ namespace vkBasalt
         ImGui::Spacing();
         ImGui::Text("Overlay Options");
         ImGui::Separator();
-
-        if (ImGui::Checkbox("Block Input When Overlay Open", &settingsBlockInput))
-            saveSettings();
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::BeginTooltip();
-            ImGui::Text("When enabled, keyboard and mouse input is captured by the overlay.");
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Warning: Experimental feature! May cause some games to freeze.");
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Also blocks ALL input system-wide, even outside the game window!");
-            ImGui::EndTooltip();
-        }
 
         ImGui::Text("Max Effects (requires restart):");
         if (ImGui::IsItemHovered())
@@ -136,8 +126,30 @@ namespace vkBasalt
             ImGui::SetTooltip("Enable depth buffer capture for effects that use depth.\nMay impact performance. Most effects don't need this.\nChanges require restarting the application.");
 
         ImGui::Spacing();
-        ImGui::Text("Debug");
+        ImGui::Text("Advanced Options");
         ImGui::Separator();
+
+        if (ImGui::Checkbox("Render Below UI (experimental)", &settingsRenderBelowUI))
+            saveSettings();
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::BeginTooltip();
+            ImGui::Text("Apply effects between game world and UI layers.");
+            ImGui::Text("Keeps HUD/reticles readable while effects are applied to the game world.");
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Experimental: Requires per-game configuration.");
+            ImGui::EndTooltip();
+        }
+
+        if (ImGui::Checkbox("Block Input When Overlay Open", &settingsBlockInput))
+            saveSettings();
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::BeginTooltip();
+            ImGui::Text("When enabled, keyboard and mouse input is captured by the overlay.");
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Warning: Experimental feature! May cause some games to freeze.");
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Also blocks ALL input system-wide, even outside the game window!");
+            ImGui::EndTooltip();
+        }
 
         if (ImGui::Checkbox("Show Debug Window", &settingsShowDebugWindow))
         {

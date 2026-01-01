@@ -29,6 +29,7 @@ namespace vkBasalt
         bool depthCapture = false;
         int autoApplyDelay = 200;  // ms delay before auto-applying changes
         bool showDebugWindow = false;  // Show debug window with raw effect registry data
+        bool renderPassInjection = false;   // Inject effects at render pass boundaries (experimental)
     };
 
     // Shader Manager configuration (from shader_manager.conf)

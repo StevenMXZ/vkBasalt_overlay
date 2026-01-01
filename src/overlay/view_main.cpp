@@ -95,6 +95,7 @@ namespace vkBasalt
             settingsDepthCapture = currentSettings.depthCapture;
             settingsAutoApplyDelay = currentSettings.autoApplyDelay;
             settingsShowDebugWindow = currentSettings.showDebugWindow;
+            settingsRenderBelowUI = currentSettings.renderPassInjection;
             Logger::setHistoryEnabled(settingsShowDebugWindow);
             settingsInitialized = true;
         }

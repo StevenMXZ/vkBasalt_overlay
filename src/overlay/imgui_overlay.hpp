@@ -150,6 +150,7 @@ namespace vkBasalt
         bool settingsInitialized = false;
         int listeningForKey = 0;  // 0=none, 1=toggle, 2=reload, 3=overlay
         bool settingsShowDebugWindow = false;  // Show debug window
+        bool settingsRenderBelowUI = false;   // Render effects below game UI
         int debugWindowTab = 0;  // 0=Registry, 1=Log
         bool debugLogFilters[5] = {true, true, true, true, true};  // Trace, Debug, Info, Warn, Error
         char debugLogSearch[128] = "";  // Search filter for log tab
