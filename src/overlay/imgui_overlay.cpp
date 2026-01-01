@@ -546,6 +546,9 @@ namespace vkBasalt
         // Debug window (separate, controlled by setting)
         renderDebugWindow();
 
+        // Render pass injection config window (separate, controlled by setting)
+        renderRenderPassConfigWindow();
+
         // Focus Effects window on first frame of the session
         static bool firstFrame = true;
         if (firstFrame)

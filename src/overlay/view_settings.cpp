@@ -22,7 +22,7 @@ namespace vkBasalt
             newSettings.depthCapture = settingsDepthCapture;
             newSettings.autoApplyDelay = settingsAutoApplyDelay;
             newSettings.showDebugWindow = settingsShowDebugWindow;
-            newSettings.renderPassInjection = settingsRenderBelowUI;
+            newSettings.renderPassInjection = settingsRenderPassInjection;
             ConfigSerializer::saveSettings(newSettings);
             settingsSaved = true;
         };
@@ -129,7 +129,7 @@ namespace vkBasalt
         ImGui::Text("Advanced Options");
         ImGui::Separator();
 
-        if (ImGui::Checkbox("Render Below UI (experimental)", &settingsRenderBelowUI))
+        if (ImGui::Checkbox("Render Below UI (experimental)", &settingsRenderPassInjection))
             saveSettings();
         if (ImGui::IsItemHovered())
         {
