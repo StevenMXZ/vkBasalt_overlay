@@ -19,11 +19,20 @@ namespace vkBasalt
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::Text("Detected Render Passes:");
+        auto passes = pLogicalDevice->renderPassTracker.getPasses();
+        ImGui::Text("Detected Render Passes: %zu", passes.size());
         ImGui::BeginChild("PassList", ImVec2(0, 120), true);
-        // Placeholder - will be populated by render pass tracker
-        ImGui::TextDisabled("No render passes detected yet.");
-        ImGui::TextDisabled("Run a game to detect render passes.");
+        if (passes.empty())
+        {
+            ImGui::TextDisabled("No render passes detected yet.");
+        }
+        else
+        {
+            for (const auto& pass : passes)
+            {
+                ImGui::Text("Pass %u: %ux%u", pass.index, pass.width, pass.height);
+            }
+        }
         ImGui::EndChild();
 
         ImGui::Spacing();

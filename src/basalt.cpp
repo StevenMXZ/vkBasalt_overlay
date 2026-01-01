@@ -1051,6 +1051,8 @@ namespace vkBasalt
     {
         scoped_lock l(globalLock);
 
+        LogicalDevice* pLogicalDevice = deviceMap[GetKey(queue)].get();
+
         // Keybindings - can be reloaded when settings are saved
         static uint32_t keySymbol = convertToKeySym(pConfig->getOption<std::string>("toggleKey", "Home"));
         static uint32_t reloadKeySymbol = convertToKeySym(pConfig->getOption<std::string>("reloadKey", "F10"));
@@ -1113,9 +1115,6 @@ namespace vkBasalt
             if (pDevice->imguiOverlay)
                 pDevice->imguiOverlay->toggle();
         }
-
-        // Check for Apply button press in overlay (overlay is at device level)
-        LogicalDevice* pLogicalDevice = deviceMap[GetKey(queue)].get();
 
         // Toggle effects on/off via overlay checkbox
         if (pLogicalDevice->imguiOverlay && pLogicalDevice->imguiOverlay->hasToggleEffectsRequest())
@@ -1230,7 +1229,12 @@ namespace vkBasalt
         presentInfo.waitSemaphoreCount = presentSemaphores.size();
         presentInfo.pWaitSemaphores    = presentSemaphores.data();
 
-        return pLogicalDevice->vkd.QueuePresentKHR(queue, &presentInfo);
+        VkResult result = pLogicalDevice->vkd.QueuePresentKHR(queue, &presentInfo);
+
+        // Clear render pass tracker for next frame (after UI has read the passes)
+        pLogicalDevice->renderPassTracker.beginFrame();
+
+        return result;
     }
 
     VKAPI_ATTR void VKAPI_CALL vkBasalt_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator)
@@ -1362,6 +1366,23 @@ namespace vkBasalt
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
+    // Render pass tracking
+
+    VKAPI_ATTR void VKAPI_CALL vkBasalt_CmdBeginRenderPass(VkCommandBuffer              commandBuffer,
+                                                           const VkRenderPassBeginInfo* pRenderPassBegin,
+                                                           VkSubpassContents            contents)
+    {
+        scoped_lock l(globalLock);
+        LogicalDevice* pLogicalDevice = deviceMap[GetKey(commandBuffer)].get();
+
+        // Track the render pass
+        pLogicalDevice->renderPassTracker.recordPass(pRenderPassBegin);
+
+        // Call the real function
+        pLogicalDevice->vkd.CmdBeginRenderPass(commandBuffer, pRenderPassBegin, contents);
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
     // Enumeration function
 
     VkResult VKAPI_CALL vkBasalt_EnumerateInstanceLayerProperties(uint32_t* pPropertyCount, VkLayerProperties* pProperties)
@@ -1472,6 +1493,11 @@ extern "C"
         GETPROCADDR(CreateImage); \
         GETPROCADDR(DestroyImage); \
         GETPROCADDR(BindImageMemory); \
+    } \
+\
+    if (vkBasalt::pConfig->getOption<bool>("renderPassInjection", false)) \
+    { \
+        GETPROCADDR(CmdBeginRenderPass); \
     }
 
     VK_BASALT_EXPORT PFN_vkVoidFunction VKAPI_CALL vkBasalt_GetDeviceProcAddr(VkDevice device, const char* pName)

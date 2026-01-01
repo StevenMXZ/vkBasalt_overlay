@@ -9,6 +9,7 @@
 
 #include "vulkan_include.hpp"
 #include "vkdispatch.hpp"
+#include "render_pass_tracker.hpp"
 
 namespace vkBasalt
 {
@@ -35,6 +36,9 @@ namespace vkBasalt
 
         // ImGui overlay - lives at device level to survive swapchain recreation
         std::unique_ptr<ImGuiOverlay> imguiOverlay;
+
+        // Render pass tracker for injection feature
+        RenderPassTracker renderPassTracker;
     };
 } // namespace vkBasalt
 
