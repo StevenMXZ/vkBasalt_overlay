@@ -160,6 +160,8 @@ namespace vkBasalt
         {
             settingsManager.setDepthCapture(depthCapture);
             saveSettings();
+            paramsDirty = true;
+            lastChangeTime = std::chrono::steady_clock::now();
         }
         if (ImGui::IsItemHovered())
         {
@@ -183,7 +185,11 @@ namespace vkBasalt
             ImGui::SetNextItemWidth(150);
             float threshold = settingsManager.getDepthMaskThreshold();
             if (ImGui::SliderFloat("##depthThreshold", &threshold, 0.9f, 1.0f, "%.4f"))
+            {
                 settingsManager.setDepthMaskThreshold(threshold);
+                paramsDirty = true;
+                lastChangeTime = std::chrono::steady_clock::now();
+            }
             if (ImGui::IsItemDeactivatedAfterEdit())
                 saveSettings();
             ImGui::Unindent();

@@ -124,7 +124,6 @@ namespace vkBasalt
         ImGui::BeginChild("EffectList", ImVec2(0, -footerHeight), false);
 
         // Show selected effects with their parameters
-        bool changedThisFrame = false;
         float itemHeight = ImGui::GetFrameHeightWithSpacing();
 
         // Reset drag target each frame
@@ -162,7 +161,6 @@ namespace vkBasalt
             {
                 if (pEffectRegistry)
                     pEffectRegistry->setEffectEnabled(effectName, effectEnabled);
-                changedThisFrame = true;
                 paramsDirty = true;
                 lastChangeTime = std::chrono::steady_clock::now();
             }
@@ -199,7 +197,6 @@ namespace vkBasalt
                 {
                     if (pEffectRegistry)
                         pEffectRegistry->setEffectEnabled(effectName, !effectEnabled);
-                    changedThisFrame = true;
                     paramsDirty = true;
                     lastChangeTime = std::chrono::steady_clock::now();
                 }
@@ -213,7 +210,6 @@ namespace vkBasalt
                         if (editor)
                             editor->resetToDefault(*param);
                     }
-                    changedThisFrame = true;
                     paramsDirty = true;
                     lastChangeTime = std::chrono::steady_clock::now();
                 }
@@ -233,7 +229,6 @@ namespace vkBasalt
                 {
                     selectedEffects.erase(selectedEffects.begin() + i);
                     pEffectRegistry->setSelectedEffects(selectedEffects);
-                    changedThisFrame = true;
                     paramsDirty = true;
                     lastChangeTime = std::chrono::steady_clock::now();
                 }
@@ -302,7 +297,6 @@ namespace vkBasalt
                 if (renderFieldEditor(*effectParams[paramIdx]))
                 {
                     paramsDirty = true;
-                    changedThisFrame = true;
                     lastChangeTime = std::chrono::steady_clock::now();
                 }
                 ImGui::PopID();
@@ -327,7 +321,6 @@ namespace vkBasalt
                     selectedEffects.erase(selectedEffects.begin() + dragSourceIndex);
                     selectedEffects.insert(selectedEffects.begin() + dragTargetIndex, moving);
                     pEffectRegistry->setSelectedEffects(selectedEffects);
-                    changedThisFrame = true;
                     paramsDirty = true;
                     lastChangeTime = std::chrono::steady_clock::now();
                 }
@@ -357,22 +350,7 @@ namespace vkBasalt
             saveToPersistentState();
         }
 
-        // Auto-apply with debounce (configurable delay after last change)
-        if (settingsManager.getAutoApply() && paramsDirty && !changedThisFrame)
-        {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastChangeTime).count();
-            if (elapsed >= settingsManager.getAutoApplyDelay())
-            {
-                applyRequested = true;
-                paramsDirty = false;
-                saveToPersistentState();
-            }
-        }
-
-        // Save state when effects/params change
-        if (changedThisFrame)
-            saveToPersistentState();
+        // Note: Auto-apply check moved to imgui_overlay.cpp (runs globally every frame)
     }
 
 } // namespace vkBasalt
