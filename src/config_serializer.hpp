@@ -30,7 +30,7 @@ namespace vkBasalt
         int autoApplyDelay = 200;  // ms delay before auto-applying changes
         bool showDebugWindow = false;  // Show debug window with raw effect registry data
         bool renderPassInjection = false;   // Inject effects at render pass boundaries (experimental)
-        int injectionPassIndex = 0;          // Which render pass to inject effects after
+        int skipLastNPasses = 0;             // Skip last N passes (inject effects before them)
     };
 
     // Shader Manager configuration (from shader_manager.conf)

@@ -16,6 +16,7 @@
     FORVKFUNC(BindBufferMemory) \
     FORVKFUNC(BindImageMemory) \
     FORVKFUNC(CmdBeginRenderPass) \
+    FORVKFUNC(CmdBeginRendering) \
     FORVKFUNC(CmdBindDescriptorSets) \
     FORVKFUNC(CmdBindIndexBuffer) \
     FORVKFUNC(CmdBindPipeline) \
@@ -26,6 +27,7 @@
     FORVKFUNC(CmdDraw) \
     FORVKFUNC(CmdDrawIndexed) \
     FORVKFUNC(CmdEndRenderPass) \
+    FORVKFUNC(CmdEndRendering) \
     FORVKFUNC(CmdPipelineBarrier) \
     FORVKFUNC(CmdPushConstants) \
     FORVKFUNC(CmdSetScissor) \

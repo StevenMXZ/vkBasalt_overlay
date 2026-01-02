@@ -1121,13 +1121,13 @@ namespace vkBasalt
         static bool overlayPressed = false;
         static bool injectionInitialized = false;
 
-        // Initialize injection pass index from settings on first frame
+        // Initialize injection settings from config on first frame
         if (!injectionInitialized && pConfig->getOption<bool>("renderPassInjection", false))
         {
             VkBasaltSettings initSettings = ConfigSerializer::loadSettings();
-            pLogicalDevice->renderPassTracker.setTargetPassIndex(initSettings.injectionPassIndex);
+            pLogicalDevice->renderPassTracker.setSkipLastN(initSettings.skipLastNPasses);
             injectionInitialized = true;
-            Logger::debug("Initialized injection pass index: " + std::to_string(initSettings.injectionPassIndex));
+            Logger::debug("Initialized skip last N passes: " + std::to_string(initSettings.skipLastNPasses));
         }
 
         // Check if settings were saved (reload keybindings and other settings)
@@ -1139,9 +1139,9 @@ namespace vkBasalt
             reloadKeySymbol = convertToKeySym(newSettings.reloadKey);
             overlayKeySymbol = convertToKeySym(newSettings.overlayKey);
             initInputBlocker(newSettings.overlayBlockInput);
-            pDeviceForSettings->renderPassTracker.setTargetPassIndex(newSettings.injectionPassIndex);
+            pDeviceForSettings->renderPassTracker.setSkipLastN(newSettings.skipLastNPasses);
             pDeviceForSettings->imguiOverlay->clearSettingsSaved();
-            Logger::info("Settings reloaded, injection pass index: " + std::to_string(newSettings.injectionPassIndex));
+            Logger::info("Settings reloaded, skip last N passes: " + std::to_string(newSettings.skipLastNPasses));
         }
 
         // Check if shader paths were changed (refresh available effects list)
@@ -1442,6 +1442,93 @@ namespace vkBasalt
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Render pass tracking
 
+    // Helper function to perform effect injection after a render pass ends
+    // Called by both CmdEndRenderPass and CmdEndRendering
+    static void tryInjectEffects(LogicalDevice* pLogicalDevice, VkCommandBuffer commandBuffer, int endedPassIndex)
+    {
+        // Check if we should inject after this pass (based on stable pass count)
+        if (!pLogicalDevice->renderPassTracker.shouldInjectAfterPass(endedPassIndex))
+            return;
+
+        uint32_t stableCount = pLogicalDevice->renderPassTracker.getStablePassCount();
+        int skipLastN = pLogicalDevice->renderPassTracker.getSkipLastN();
+        Logger::debug("Injection point: pass " + std::to_string(endedPassIndex) +
+                      " (stable count " + std::to_string(stableCount) + ", skip last " +
+                      std::to_string(skipLastN) + ")");
+
+        // Find the swapchain for this device (with injection enabled)
+        LogicalSwapchain* pSwapchain = nullptr;
+        for (auto& [handle, swapchain] : swapchainMap)
+        {
+            if (swapchain->pLogicalDevice == pLogicalDevice && swapchain->injectionCopyBack)
+            {
+                pSwapchain = swapchain.get();
+                break;
+            }
+        }
+
+        if (!pSwapchain || !pSwapchain->injectionCopyBack || pSwapchain->effects.empty())
+            return;
+
+        // Get the current image index
+        uint32_t imageIndex = pLogicalDevice->renderPassTracker.getAcquiredImageIndex(pSwapchain->swapchainHandle);
+        Logger::debug("Applying " + std::to_string(pSwapchain->effects.size()) +
+                      " effects at injection point, image index " + std::to_string(imageIndex));
+
+        // Transition fake image: COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR
+        VkImageMemoryBarrier preBarrier = {};
+        preBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        preBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        preBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        preBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        preBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        preBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        preBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        preBarrier.image = pSwapchain->fakeImages[imageIndex];
+        preBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        preBarrier.subresourceRange.baseMipLevel = 0;
+        preBarrier.subresourceRange.levelCount = 1;
+        preBarrier.subresourceRange.baseArrayLayer = 0;
+        preBarrier.subresourceRange.layerCount = 1;
+
+        pLogicalDevice->vkd.CmdPipelineBarrier(commandBuffer,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &preBarrier);
+
+        // Apply the actual effect chain (slot 0 → ... → real swapchain)
+        for (auto& effect : pSwapchain->effects)
+            effect->applyEffect(imageIndex, commandBuffer);
+
+        // Copy processed result back: real swapchain → fake slot 0
+        pSwapchain->injectionCopyBack->applyEffect(imageIndex, commandBuffer);
+
+        // Transition fake image back: PRESENT_SRC_KHR → COLOR_ATTACHMENT_OPTIMAL
+        VkImageMemoryBarrier postBarrier = {};
+        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        postBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        postBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        postBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        postBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        postBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        postBarrier.image = pSwapchain->fakeImages[imageIndex];
+        postBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        postBarrier.subresourceRange.baseMipLevel = 0;
+        postBarrier.subresourceRange.levelCount = 1;
+        postBarrier.subresourceRange.baseArrayLayer = 0;
+        postBarrier.subresourceRange.layerCount = 1;
+
+        pLogicalDevice->vkd.CmdPipelineBarrier(commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &postBarrier);
+
+        // Mark that injection was performed this frame
+        pLogicalDevice->renderPassTracker.setInjectionPerformed(true);
+        Logger::debug("Injection effects applied successfully");
+    }
+
     VKAPI_ATTR void VKAPI_CALL vkBasalt_CmdBeginRenderPass(VkCommandBuffer              commandBuffer,
                                                            const VkRenderPassBeginInfo* pRenderPassBegin,
                                                            VkSubpassContents            contents)
@@ -1467,104 +1554,39 @@ namespace vkBasalt
         // Call the real function first
         pLogicalDevice->vkd.CmdEndRenderPass(commandBuffer);
 
-        // Check if we should inject effects after this pass
-        int targetPass = pLogicalDevice->renderPassTracker.getTargetPassIndex();
-        if (endedPassIndex == targetPass)
-        {
-            // Get framebuffer info for this pass
-            auto passes = pLogicalDevice->renderPassTracker.getPasses();
-            if (endedPassIndex < static_cast<int>(passes.size()))
-            {
-                const auto& passInfo = passes[endedPassIndex];
-                FramebufferInfo fbInfo;
-                if (pLogicalDevice->renderPassTracker.getFramebufferInfo(passInfo.framebuffer, fbInfo))
-                {
-                    Logger::debug("Injection point: pass " + std::to_string(endedPassIndex) +
-                                  ", fb size " + std::to_string(fbInfo.width) + "x" + std::to_string(fbInfo.height) +
-                                  ", " + std::to_string(fbInfo.attachments.size()) + " attachments");
+        // Try to inject effects after this pass
+        tryInjectEffects(pLogicalDevice, commandBuffer, endedPassIndex);
+    }
 
-                    // Find the swapchain for this device (with injection enabled)
-                    LogicalSwapchain* pSwapchain = nullptr;
-                    for (auto& [handle, swapchain] : swapchainMap)
-                    {
-                        if (swapchain->pLogicalDevice == pLogicalDevice && swapchain->injectionCopyBack)
-                        {
-                            pSwapchain = swapchain.get();
-                            break;
-                        }
-                    }
+    // Dynamic rendering support (Vulkan 1.3 / VK_KHR_dynamic_rendering)
+    // Used by DXVK and modern Vulkan applications
+    VKAPI_ATTR void VKAPI_CALL vkBasalt_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo* pRenderingInfo)
+    {
+        scoped_lock l(globalLock);
+        LogicalDevice* pLogicalDevice = deviceMap[GetKey(commandBuffer)].get();
 
-                    if (pSwapchain && pSwapchain->injectionCopyBack && !pSwapchain->effects.empty())
-                    {
-                        // Get the current image index
-                        uint32_t imageIndex = pLogicalDevice->renderPassTracker.getAcquiredImageIndex(pSwapchain->swapchainHandle);
-                        Logger::debug("Applying " + std::to_string(pSwapchain->effects.size()) +
-                                      " effects at injection point, image index " + std::to_string(imageIndex));
+        // Track as a dynamic rendering pass
+        uint32_t width = pRenderingInfo->renderArea.extent.width;
+        uint32_t height = pRenderingInfo->renderArea.extent.height;
+        pLogicalDevice->renderPassTracker.recordDynamicPass(width, height);
 
-                        // Transition fake image: COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR
-                        // (so effects can read from it)
-                        VkImageMemoryBarrier preBarrier = {};
-                        preBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                        preBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-                        preBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-                        preBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                        preBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-                        preBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                        preBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                        preBarrier.image = pSwapchain->fakeImages[imageIndex];
-                        preBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                        preBarrier.subresourceRange.baseMipLevel = 0;
-                        preBarrier.subresourceRange.levelCount = 1;
-                        preBarrier.subresourceRange.baseArrayLayer = 0;
-                        preBarrier.subresourceRange.layerCount = 1;
+        // Call the real function
+        pLogicalDevice->vkd.CmdBeginRendering(commandBuffer, pRenderingInfo);
+    }
 
-                        pLogicalDevice->vkd.CmdPipelineBarrier(commandBuffer,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                            0, 0, nullptr, 0, nullptr, 1, &preBarrier);
+    VKAPI_ATTR void VKAPI_CALL vkBasalt_CmdEndRendering(VkCommandBuffer commandBuffer)
+    {
+        scoped_lock l(globalLock);
+        LogicalDevice* pLogicalDevice = deviceMap[GetKey(commandBuffer)].get();
 
-                        // Apply the actual effect chain (slot 0 → ... → real swapchain)
-                        for (auto& effect : pSwapchain->effects)
-                            effect->applyEffect(imageIndex, commandBuffer);
+        // Track which pass just ended
+        int endedPassIndex = pLogicalDevice->renderPassTracker.endPass();
 
-                        // Copy processed result back: real swapchain → fake slot 0
-                        // (so UI renders on top of processed world)
-                        pSwapchain->injectionCopyBack->applyEffect(imageIndex, commandBuffer);
+        // Call the real function first
+        pLogicalDevice->vkd.CmdEndRendering(commandBuffer);
 
-                        // Transition fake image back: PRESENT_SRC_KHR → COLOR_ATTACHMENT_OPTIMAL
-                        // (so game can continue rendering UI)
-                        VkImageMemoryBarrier postBarrier = {};
-                        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                        postBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-                        postBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-                        postBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-                        postBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                        postBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                        postBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                        postBarrier.image = pSwapchain->fakeImages[imageIndex];
-                        postBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                        postBarrier.subresourceRange.baseMipLevel = 0;
-                        postBarrier.subresourceRange.levelCount = 1;
-                        postBarrier.subresourceRange.baseArrayLayer = 0;
-                        postBarrier.subresourceRange.layerCount = 1;
-
-                        pLogicalDevice->vkd.CmdPipelineBarrier(commandBuffer,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            0, 0, nullptr, 0, nullptr, 1, &postBarrier);
-
-                        Logger::debug("Injection effects applied successfully");
-                    }
-
-                    // Mark that we reached the injection point
-                    pLogicalDevice->renderPassTracker.setInjectionPerformed(true);
-                }
-                else
-                {
-                    Logger::debug("Injection point: pass " + std::to_string(endedPassIndex) + " (no fb info)");
-                }
-            }
-        }
+        // Try to inject effects after this pass
+        tryInjectEffects(pLogicalDevice, commandBuffer, endedPassIndex);
     }
 
     VKAPI_ATTR VkResult VKAPI_CALL vkBasalt_CreateFramebuffer(VkDevice                       device,
@@ -1729,6 +1751,8 @@ extern "C"
     { \
         GETPROCADDR(CmdBeginRenderPass); \
         GETPROCADDR(CmdEndRenderPass); \
+        GETPROCADDR(CmdBeginRendering); \
+        GETPROCADDR(CmdEndRendering); \
         GETPROCADDR(CreateFramebuffer); \
         GETPROCADDR(DestroyFramebuffer); \
         GETPROCADDR(AcquireNextImageKHR); \
