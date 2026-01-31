@@ -1,0 +1,36 @@
+name: Build vkBasalt ARM64 for Winlator
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    name: Build on Ubuntu 20.04 (ARM64)
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run on ARM64
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu20.04
+          # Instala tudo o que precisamos automaticamente
+          install: |
+            apt-get update
+            apt-get install -y build-essential git meson ninja-build libvulkan-dev glslang-tools libx11-dev libx11-xcb-dev libxrandr-dev libxi-dev libxfixes-dev spirv-headers
+          
+          # Roda os comandos de build dentro do ambiente ARM64
+          run: |
+            meson setup --buildtype=release build-arm64
+            ninja -C build-arm64
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vkbasalt-overlay-arm64
+          path: |
+            build-arm64/src/libvkbasalt-overlay.so
+            build-arm64/config/vkBasalt-overlay.json
