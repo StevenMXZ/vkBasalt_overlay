@@ -8,7 +8,7 @@ on:
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
-    name: Build on Ubuntu 20.04 (ARM64)
+    name: Build on Ubuntu 22.04 (ARM64)
     steps:
       - uses: actions/checkout@v3
 
@@ -16,14 +16,17 @@ jobs:
         uses: uraimo/run-on-arch-action@v2
         with:
           arch: aarch64
-          distro: ubuntu20.04
-          # Adicionado pkg-config na lista abaixo
+          distro: ubuntu22.04  # Mudamos para 22.04 (mais estável)
           install: |
             apt-get update
-            apt-get install -y build-essential git meson ninja-build pkg-config libvulkan-dev glslang-tools libx11-dev libx11-xcb-dev libxrandr-dev libxi-dev libxfixes-dev spirv-headers
+            # Adicionei 'file', 'gcc' e 'g++' para garantir detecção correta
+            apt-get install -y build-essential git meson ninja-build pkg-config libvulkan-dev glslang-tools libx11-dev libx11-xcb-dev libxrandr-dev libxi-dev libxfixes-dev spirv-headers file gcc g++
           
-          # Comandos de build
           run: |
+            # Força o uso do GCC para o Meson não se perder
+            export CC=gcc
+            export CXX=g++
+            
             meson setup --buildtype=release build-arm64
             ninja -C build-arm64
 
